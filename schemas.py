@@ -2,32 +2,55 @@ from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 
-# 1. Admin uses this to create a temp user
-class InviteRequest(BaseModel):
-    role: str  # 'officer' or 'server_manager'
+# --- AUTH FLOW ---
 
-# 2. Officer uses this to complete registration
-class CompleteRegistration(BaseModel):
-    new_username: str
-    new_password: str
+# 1. Admin creates this
+class TempUserCreate(BaseModel):
+    role: str # 'officer'
+
+# 2. Officer sends this to Register
+class RegistrationForm(BaseModel):
     first_name: str
     last_name: str
-    substation_location: str
-    substation_id: str
     phone_number: str
     email: str
+    new_userid: str     # Must not exist
+    new_password: str
+    substation_id: str
+    substation_location: str
 
-# 3. Login Response
 class Token(BaseModel):
     access_token: str
     token_type: str
     role: str
-    is_registered: bool # Frontend uses this to redirect!
+    is_registered: bool
 
-# 4. Hardware Data
-class TelemetryData(BaseModel):
-    box_id: str
+# --- HARDWARE ---
+
+# Input from Arduino (Current Only)
+class HardwareInput(BaseModel):
+    substation_id: str
     line_id: str
+    current: float 
+    voltage: float        # <--- Added this
+    noise_level: float = 0.0 # Optional now
+# --- DASHBOARD & MAP ---
+
+class FaultLogDisplay(BaseModel):
+    id: int
+    timestamp: datetime
     voltage: float
     current: float
-    noise: float
+    fault_type: str
+    status: str
+    
+    class Config:
+        from_attributes = True
+
+class MapPin(BaseModel):
+    substation_id: str
+    location_name: str
+    status: str
+    lat: float
+    lon: float
+    google_maps_link: str

@@ -3,24 +3,22 @@ import time
 import random
 import requests
 
-# This points to your own running server
-API_URL = "http://127.0.0.1:8000/hardware/telemetry"
+# Ensure this matches your running uvicorn port
+API_URL = "http://127.0.0.1:8000/hardware/data"
 
 def run_simulation():
     print("🚀 HARDWARE SIMULATION STARTED...")
-    # Give the server 5 seconds to start up before sending data
-    time.sleep(5) 
+    time.sleep(3) # Wait for server to boot
     print(f"📡 Targeting: {API_URL}")
 
     while True:
         try:
-            # 1. Generate Fake Data (90% Normal, 10% Fault)
-            # We weigh "NORMAL" higher so you don't get spammed with faults instantly
+            # 1. Decide: Normal or Fault? (90% Normal, 10% Fault)
             scenario = random.choices(["NORMAL", "HANGING", "OVERLOAD"], weights=[90, 5, 5])[0]
             
             # Default Normal Values
-            box_id = "TRANS_BOX_01"
-            line_id = "PHASE_R"
+            sub_id = "SUB_KOCHI_01"
+            line_id = "LINE_A"
             voltage = random.uniform(220, 240)
             current = random.uniform(5, 10)
             noise = random.uniform(0, 5)
@@ -34,26 +32,33 @@ def run_simulation():
                 print("🔥 SIMULATING: Overload")
                 current = 45.0
             
-            # 2. Prepare Payload
+            # 2. Prepare Payload (MUST MATCH SCHEMAS.PY)
             payload = {
-                "box_id": box_id,
+                "substation_id": sub_id,   # Matches TelemetryData schema
                 "line_id": line_id,
                 "voltage": voltage,
                 "current": current,
-                "noise": noise
+                "noise_level": noise       # Matches TelemetryData schema
             }
 
             # 3. Send to API
-            requests.post(API_URL, json=payload)
+            response = requests.post(API_URL, json=payload)
+            
+            # 4. Handle Response
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("command") == "TRIP":
+                    print(f"🛑 COMMAND RECEIVED: TRIP! Reason: {data.get('reason')}")
+                else:
+                    print(f"✅ Server OK (V={voltage:.1f}, I={current:.1f})")
+            else:
+                print(f"⚠️ Server Error {response.status_code}: {response.text}")
 
         except Exception as e:
-            # If server is down, just wait and try again
-            pass
+            print(f"❌ Connection Error: {e}")
 
         time.sleep(3) # Send data every 3 seconds
 
-# --- THIS IS THE FUNCTION YOU WERE MISSING ---
 def start():
-    # Run this in a separate background thread so it doesn't block the server
     t = threading.Thread(target=run_simulation, daemon=True)
     t.start()

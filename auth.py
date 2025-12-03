@@ -7,24 +7,24 @@ from sqlalchemy.orm import Session
 import models, database
 
 # SECURITY CONFIG
-SECRET_KEY = "hackathon-secret-key"
+SECRET_KEY = "kseb-hackathon-secret-key"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 24 * 60 # 1 Day
+ACCESS_TOKEN_EXPIRE_MINUTES = 24 * 60  # 1 Day
 
+# Setup Password Hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# --- HELPERS ---
-def get_db():
-    db = database.SessionLocal()
-    try: yield db
-    finally: db.close()
+# --- PASSWORD HELPERS ---
 
 def get_password_hash(password):
-    return pwd_context.hash(password)
+    if not isinstance(password, str): password = str(password)
+    return pwd_context.hash(password[:72])
 
-def verify_password(plain, hashed):
-    return pwd_context.verify(plain, hashed)
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password[:72], hashed_password)
+
+# --- TOKEN GENERATION ---
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -32,7 +32,8 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-# --- DEPENDENCY ---
+# --- LOGIN DEPENDENCY ---
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -41,13 +42,24 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        userid: str = payload.get("sub")
+        if userid is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
     
-    user = db.query(models.User).filter(models.User.username == username).first()
+    # FIX: Changed models.User.username -> models.User.userid
+    user = db.query(models.User).filter(models.User.userid == userid).first()
     if user is None:
         raise credentials_exception
+    return user
+
+# --- ROLE CHECKER ---
+
+def require_admin(user: models.User = Depends(get_current_user)):
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Admin privileges required"
+        )
     return user

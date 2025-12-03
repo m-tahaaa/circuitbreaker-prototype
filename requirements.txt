@@ -7,3 +7,6 @@ passlib[bcrypt]
 python-multipart 
 pyserial
 requests
+joblib 
+numpy 
+scikit-learn

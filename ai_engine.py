@@ -1,23 +1,60 @@
-def analyze_signal(voltage: float, current: float, noise: float):
+import joblib
+import numpy as np
+import os
+
+# 1. LOAD MODEL SAFELY
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Adjust path to where your model folder actually is
+MODEL_PATH = os.path.join(BASE_DIR, "model", "fault_detector.pkl")
+
+model = None
+try:
+    print(f"🧠 AI ENGINE: Loading model from {MODEL_PATH}")
+    model = joblib.load(MODEL_PATH)
+    print("✅ AI ENGINE: Model Loaded Successfully!")
+except Exception as e:
+    print(f"⚠️ AI ENGINE ERROR: Could not load model: {e}")
+    print("   (System will run in Rule-Based Fallback Mode)")
+
+def analyze_data(current: float, voltage: float):
     """
-    Analyzes raw sensor data to detect faults.
-    Returns: (is_fault: bool, fault_type: str, confidence: float)
+    Inputs: Real Current, Dummy Voltage
     """
+    # Prepare inputs for Model: [current, phase_voltage, line_voltage]
+    # Line Voltage = Phase * 1.732 (Standard Electrical Formula)
+    phase_voltage = voltage
+    line_voltage = voltage * 1.732
     
-    # CASE 1: HANGING WIRE (The Dangerous One)
-    # Logic: Voltage is present, Current is zero, but there is "Noise" (Arcing)
-    if voltage > 200 and current < 0.1 and noise > 50:
-        return True, "HANGING_WIRE_ARCING", 0.98
+    # Default Safe State
+    is_fault = False
+    fault_type = "NORMAL"
 
-    # CASE 2: TOUCHING WET GROUND (Short Circuit)
-    # Logic: Voltage dips slightly, Current spikes massive
-    if current > 30.0:
-        return True, "GROUND_SHORT_CIRCUIT", 0.99
+    # --- OPTION A: USE ML MODEL ---
+    if model:
+        try:
+            # Predict
+            features = np.array([[current, phase_voltage, line_voltage]])
+            prediction = model.predict(features)[0]
+            
+            # Check if result is a fault
+            # Assuming your model outputs "Normal" for good state
+            if str(prediction).lower() != "normal":
+                is_fault = True
+                fault_type = str(prediction)
+                
+        except Exception as e:
+            print(f"❌ Model Prediction Failed: {e}")
+            # Fall through to manual rules
 
-    # CASE 3: TOUCHING DRY GROUND (High Impedance)
-    # Logic: Voltage is normal, Current is low (leakage), Noise is moderate
-    if voltage > 200 and 0.5 < current < 2.0 and noise > 20:
-        return True, "HIGH_IMPEDANCE_GROUND_FAULT", 0.75
+    # --- OPTION B: MANUAL RULES (Backup) ---
+    # If model fails or isn't loaded, we use physics logic
+    if not model:
+        if current > 20.0:
+            is_fault = True
+            fault_type = "OVERLOAD_BACKUP"
+        elif current < 0.1 and voltage > 200:
+            is_fault = True
+            fault_type = "HANGING_WIRE_BACKUP"
 
-    # CASE 4: NORMAL OPERATION
-    return False, "NORMAL", 0.0
+    # Return result + Voltage (for logging)
+    return is_fault, fault_type, voltage
