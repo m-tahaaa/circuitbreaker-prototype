@@ -175,44 +175,45 @@ def get_map_pins(user: models.User = Depends(auth.get_current_user)):
     }]
 
 # --- 3. HARDWARE CONTROL ---
-
-# Arduino Polling / Data Ingestion
-# --- HARDWARE DATA INGESTION ---
-
+# The Bridge calls this every 1 second
 @app.post("/hardware/data")
 def receive_data(data: schemas.HardwareInput, db: Session = Depends(database.get_db)):
     global manual_command_queue, live_grid_state
     
     # 1. Run Logic (AI + Physics)
-    # This detects if there is a fault, but we won't act on it yet.
-    is_fault, fault_msg, voltage = ai_engine.analyze_data(data.current, data.voltage)
+    # We pass data.current and data.voltage (assuming voltage comes from bridge or is fixed)
+    # Note: If voltage isn't in schemas.HardwareInput, use a fixed value or calculate it.
+    is_fault, fault_msg, voltage = ai_engine.analyze_data(data.current, 230.0) 
     
-    # Update Live Cache (So Dashboard sees numbers)
+    # 2. Update Live Cache (So Dashboard sees numbers)
     live_grid_state["voltage"] = voltage
     live_grid_state["current"] = data.current
     live_grid_state["last_updated"] = datetime.now(timezone.utc)
 
-    command_to_send = "CONTINUE"
+    # Default response to Arduino
+    command_to_send = None
 
     # PRIORITY 1: AI Fault Detection (LOG ONLY, DO NOT TRIP)
     if is_fault:
-        # We update status to CRITICAL so the Dashboard turns Red/Alerts user
         live_grid_state["status"] = "CRITICAL"
         
-        # We Log it to DB (So history table updates)
+        # Log to DB
         log = models.FaultLog(
-            substation_id=data.substation_id, line_id=data.line_id,
-            voltage=voltage, current=data.current,
-            fault_type=fault_msg, status="Active"
+            substation_id=data.substation_id, 
+            line_id=data.line_id,
+            voltage=voltage, 
+            current=data.current,
+            fault_type=fault_msg, 
+            status="Active"
         )
         db.add(log)
         db.commit()
         
-        # We Send Alerts (SMS/Email)
+        # Send Alerts
         notifications.send_alert("9988776655", "officer@kseb.in", fault_msg, data.current, voltage)
         
-        # NOTE: command_to_send stays "CONTINUE". 
-        # The Arduino keeps running until a HUMAN sends "TRIP".
+        # LOGIC CHECK: We do NOT set command_to_send="TRIP" here. 
+        # The motor stays ON until a human intervenes. Correct.
 
     # PRIORITY 2: Manual Override (The only way to move the motor)
     if manual_command_queue:
@@ -225,23 +226,27 @@ def receive_data(data: schemas.HardwareInput, db: Session = Depends(database.get
         elif command_to_send == "RESET":
             live_grid_state["status"] = "STABLE"
             
-        manual_command_queue = None # Clear queue after sending
+        # CLEAR THE QUEUE so it doesn't trip repeatedly
+        manual_command_queue = None 
 
     return {"command": command_to_send}
 
-# Manual Control from Map (Resume/Stop)
 # --- MANUAL CONTROL ENDPOINT ---
-
+# The User (Frontend) calls this
 @app.post("/api/control/{action}")
 def manual_control(action: str, user: models.User = Depends(auth.get_current_user)):
     global manual_command_queue
     
     # Validate Input
-    if action not in ["TRIP", "RESET"]:
+    if action.upper() not in ["TRIP", "RESET"]:
         raise HTTPException(status_code=400, detail="Invalid action. Use TRIP or RESET.")
     
     # Queue the command for the next Arduino heartbeat
-    manual_command_queue = action
+    manual_command_queue = action.upper()
     print(f"🛑 MANUAL COMMAND QUEUED: {action} by {user.userid}")
     
-    return {"status": "Queued", "action": action, "message": "Command will be sent on next heartbeat."}
+    return {
+        "status": "Queued", 
+        "action": action, 
+        "message": "Command will be sent on next heartbeat."
+    }
