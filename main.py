@@ -34,9 +34,9 @@ manual_command_queue = None
 
 @app.on_event("startup")
 def startup():
-    #simulation.start() # Hardware Simulator
+    simulation.start() # Hardware Simulator
     print("🔌 Starting Serial Bridge for Real Arduino...")
-    serial_bridge.start()
+    #serial_bridge.start()
 
 # --- 1. AUTHENTICATION FLOW ---
 
@@ -181,57 +181,56 @@ def receive_data(data: schemas.HardwareInput, db: Session = Depends(database.get
     global manual_command_queue, live_grid_state
     
     # 1. Run Logic (AI + Physics)
-    # We pass data.current and data.voltage (assuming voltage comes from bridge or is fixed)
-    # Note: If voltage isn't in schemas.HardwareInput, use a fixed value or calculate it.
-    is_fault, fault_msg, voltage = ai_engine.analyze_data(data.current, 230.0) 
+    is_fault, fault_msg, voltage = ai_engine.analyze_data(data.current, data.voltage)
     
-    # 2. Update Live Cache (So Dashboard sees numbers)
+    # Update Live Cache
     live_grid_state["voltage"] = voltage
     live_grid_state["current"] = data.current
     live_grid_state["last_updated"] = datetime.now(timezone.utc)
 
-    # Default response to Arduino
-    command_to_send = None
+    command_to_send = "CONTINUE"
 
-    # PRIORITY 1: AI Fault Detection (LOG ONLY, DO NOT TRIP)
-    if is_fault:
-        live_grid_state["status"] = "CRITICAL"
-        
-        # Log to DB
-        log = models.FaultLog(
-            substation_id=data.substation_id, 
-            line_id=data.line_id,
-            voltage=voltage, 
-            current=data.current,
-            fault_type=fault_msg, 
-            status="Active"
-        )
-        db.add(log)
-        db.commit()
-        
-        # Send Alerts
-        notifications.send_alert("9988776655", "officer@kseb.in", fault_msg, data.current, voltage)
-        
-        # LOGIC CHECK: We do NOT set command_to_send="TRIP" here. 
-        # The motor stays ON until a human intervenes. Correct.
-
-    # PRIORITY 2: Manual Override (The only way to move the motor)
+    # --- PRIORITY 1: MANUAL OVERRIDE ---
     if manual_command_queue:
         print(f"⚠️ EXECUTING MANUAL COMMAND: {manual_command_queue}")
         command_to_send = manual_command_queue
         
-        # Update status display based on manual command
+        # Update status purely for feedback
         if command_to_send == "TRIP":
             live_grid_state["status"] = "MANUAL_TRIP"
         elif command_to_send == "RESET":
             live_grid_state["status"] = "STABLE"
             
-        # CLEAR THE QUEUE so it doesn't trip repeatedly
         manual_command_queue = None 
+        return {"command": command_to_send, "reason": "Manual Override"}
 
-    return {"command": command_to_send}
+    # --- PRIORITY 2: LIVE AI DETECTION (Direct Mapping) ---
+    # We removed the "Latch" here. It strictly follows the AI.
+    
+    if is_fault:
+        live_grid_state["status"] = "CRITICAL"
+        print(f"🚨 FAULT DETECTED: {fault_msg} | Sending TRIP")
+        
+        # Log to DB
+        log = models.FaultLog(
+            substation_id=data.substation_id, line_id=data.line_id,
+            voltage=voltage, current=data.current,
+            fault_type=fault_msg, status="Active"
+        )
+        db.add(log)
+        db.commit()
+        
+        # Send Alert
+        notifications.send_alert("9988776655", "officer@kseb.in", fault_msg, data.current, voltage)
+        
+        command_to_send = "TRIP"
+    else:
+        # If AI says Normal, we say CONTINUE/STABLE
+        live_grid_state["status"] = "STABLE"
+        command_to_send = "CONTINUE"
 
-# --- MANUAL CONTROL ENDPOINT ---
+    return {"command": command_to_send, "reason": fault_msg}
+
 # The User (Frontend) calls this
 @app.post("/api/control/{action}")
 def manual_control(action: str, user: models.User = Depends(auth.get_current_user)):

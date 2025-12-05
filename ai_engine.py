@@ -1,12 +1,29 @@
 import joblib
 import numpy as np
 import os
+import random
+import warnings
 
-# 1. LOAD MODEL SAFELY
+# Suppress warnings for cleaner logs
+warnings.filterwarnings("ignore", message="X does not have valid feature names")
+
+# --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Adjust path to where your model folder actually is
-MODEL_PATH = os.path.join(BASE_DIR, "model", "fault_detector.pkl")
+MODEL_PATH = os.path.join(BASE_DIR, "model", "three_phase_fault_detector_6feat.pkl")
 
+# --- FAULT MAPPING (Must match your training labels exactly) ---
+# Your training script splits labels by '_', so "High_Impedance_R" becomes "High"
+FAULT_MAPPING = {
+    "Normal": "Normal Condition",
+    "LLL/LLLG": "Three Phase Fault",
+    "SLG": "Single Line to Ground",
+    "LL": "Line to Line",
+    "DLG": "Double Line to Ground",
+    "Open": "Open Conductor",
+    "High": "High Impedance"
+}
+
+# --- LOAD MODEL ---
 model = None
 try:
     print(f"🧠 AI ENGINE: Loading model from {MODEL_PATH}")
@@ -14,47 +31,47 @@ try:
     print("✅ AI ENGINE: Model Loaded Successfully!")
 except Exception as e:
     print(f"⚠️ AI ENGINE ERROR: Could not load model: {e}")
-    print("   (System will run in Rule-Based Fallback Mode)")
 
-def analyze_data(current: float, voltage: float):
+def analyze_data(current_R: float, voltage_R: float):
     """
-    Inputs: Real Current, Dummy Voltage
+    Inputs: Real Current (R) and Simulated Voltage (R)
+    Outputs: (is_fault, fault_message, voltage)
     """
-    # Prepare inputs for Model: [current, phase_voltage, line_voltage]
-    # Line Voltage = Phase * 1.732 (Standard Electrical Formula)
-    phase_voltage = voltage
-    line_voltage = voltage * 1.732
     
     # Default Safe State
     is_fault = False
-    fault_type = "NORMAL"
+    fault_msg = "Normal"
 
-    # --- OPTION A: USE ML MODEL ---
+    # --- 1. SIMULATE MISSING PHASES (Y & B) ---
+    # We assume Phases Y and B are Healthy (~6A, ~230V)
+    current_Y = random.uniform(5.0, 7.0)
+    current_B = random.uniform(5.0, 7.0)
+    voltage_Y = random.uniform(228.0, 232.0)
+    voltage_B = random.uniform(228.0, 232.0)
+
+    # Construct the 6-feature vector: [IR, IY, IB, VR, VY, VB]
+    input_features = np.array([[current_R, current_Y, current_B, voltage_R, voltage_Y, voltage_B]])
+
+    # --- 2. ML PREDICTION ---
     if model:
         try:
-            # Predict
-            features = np.array([[current, phase_voltage, line_voltage]])
-            prediction = model.predict(features)[0]
+            # Get the raw prediction string from the model
+            prediction_code = model.predict(input_features)[0]
+            prediction_str = str(prediction_code)
             
-            # Check if result is a fault
-            # Assuming your model outputs "Normal" for good state
-            if str(prediction).lower() != "normal":
+            # DEBUG PRINT: Use this to see why it fails!
+            print(f"🔍 AI INPUT: I=[{current_R:.1f}, {current_Y:.1f}, {current_B:.1f}] V=[{voltage_R:.1f}, {voltage_Y:.1f}, {voltage_B:.1f}]")
+            print(f"🧠 AI PREDICTION: '{prediction_str}'")
+
+            # Check if the prediction is NOT Normal
+            # Note: We use strip() to remove any accidental spaces
+            if prediction_str.strip() != "Normal":
                 is_fault = True
-                fault_type = str(prediction)
+                fault_msg = FAULT_MAPPING.get(prediction_str, f"Unknown ({prediction_str})")
                 
         except Exception as e:
-            print(f"❌ Model Prediction Failed: {e}")
-            # Fall through to manual rules
-
-    # --- OPTION B: MANUAL RULES (Backup) ---
-    # If model fails or isn't loaded, we use physics logic
-    if not model:
-        if current > 20.0:
-            is_fault = True
-            fault_type = "OVERLOAD_BACKUP"
-        elif current < 0.1 and voltage > 200:
-            is_fault = True
-            fault_type = "HANGING_WIRE_BACKUP"
-
-    # Return result + Voltage (for logging)
-    return is_fault, fault_type, voltage
+            print(f"❌ Prediction Crash: {e}")
+            # No backup rules anymore, so we default to Normal if crash
+            pass
+            
+    return is_fault, fault_msg, voltage_R
