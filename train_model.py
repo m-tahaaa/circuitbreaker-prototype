@@ -62,14 +62,19 @@ def generate_fault_data(num_samples_per_fault):
                 If = rules.get("If", (0,0))
                 In = rules.get("In", (0,0))
                 Vf = rules.get("Vpf", (0,0))
-                Vn = rules.get("Vn", (0,0))
+                
+                # --- FIX IS HERE: Changed "Vn" to "Vpn" ---
+                Vn = rules.get("Vpn", (0,0)) 
 
                 IR = np.random.uniform(*If)
                 VR = np.random.uniform(*Vf)
                 
+                # Logic to determine if Y phase is faulted or normal
+                # Checks if "Y" is in the fault name (e.g., "LL_RY")
                 IY = np.random.uniform(*If) if "Y" in fault_name else np.random.uniform(*In)
                 VY = np.random.uniform(*Vf) if "Y" in fault_name else np.random.uniform(*Vn)
                 
+                # B phase is always normal in this specific dictionary setup
                 IB = np.random.uniform(*In)
                 VB = np.random.uniform(*Vn)
                 
