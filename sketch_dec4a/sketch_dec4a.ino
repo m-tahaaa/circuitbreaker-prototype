@@ -35,7 +35,7 @@ void readAndSendCurrent() {
     sumSquares += centered * centered;
   }
   float Vrms = sqrt(sumSquares / NUM_SAMPLES);
-  float Irms = Vrms * CURRENT_PER_VOLT;
+  float Irms = Vrms * CURRENT_PER_VOLT*2;
 
   // FORMAT: SubstationID, LineID, Voltage(fake), Current
   Serial.print("SUB_1,LINE_A,230.0,"); 

@@ -35,7 +35,7 @@ manual_command_queue = None
 @app.on_event("startup")
 def startup():
     simulation.start() # Hardware Simulator
-    print("🔌 Starting Serial Bridge for Real Arduino...")
+    #print("🔌 Starting Serial Bridge for Real Arduino...")
     #serial_bridge.start()
 
 # --- 1. AUTHENTICATION FLOW ---
@@ -180,38 +180,43 @@ def get_map_pins(user: models.User = Depends(auth.get_current_user)):
 def receive_data(data: schemas.HardwareInput, db: Session = Depends(database.get_db)):
     global manual_command_queue, live_grid_state
     
-    # 1. Run Logic (AI + Physics)
+    # 1. Run Logic (Update Live Values)
     is_fault, fault_msg, voltage = ai_engine.analyze_data(data.current, data.voltage)
     
-    # Update Live Cache
     live_grid_state["voltage"] = voltage
     live_grid_state["current"] = data.current
     live_grid_state["last_updated"] = datetime.now(timezone.utc)
 
-    command_to_send = "CONTINUE"
+    # --- PRIORITY 1: HANDLE MANUAL RESET (The Only Way Out) ---
+    if manual_command_queue == "RESET":
+        print(f"✅ MANUAL RESET TRIGGERED by Admin")
+        live_grid_state["status"] = "STABLE" # Unlock the system
+        manual_command_queue = None
+        return {"command": "RESET", "reason": "Manual Reset"}
 
-    # --- PRIORITY 1: MANUAL OVERRIDE ---
-    if manual_command_queue:
-        print(f"⚠️ EXECUTING MANUAL COMMAND: {manual_command_queue}")
-        command_to_send = manual_command_queue
-        
-        # Update status purely for feedback
-        if command_to_send == "TRIP":
-            live_grid_state["status"] = "MANUAL_TRIP"
-        elif command_to_send == "RESET":
-            live_grid_state["status"] = "STABLE"
+    # --- PRIORITY 2: CHECK LATCH (Safety Lock) ---
+    # If system is already tripped, DO NOTHING.
+    if live_grid_state["status"] in ["CRITICAL", "MANUAL_TRIP"]:
+        # If we have a queued TRIP command but we are already tripped, just clear it
+        if manual_command_queue == "TRIP": 
+            manual_command_queue = None
             
-        manual_command_queue = None 
-        return {"command": command_to_send, "reason": "Manual Override"}
+        return {"command": "CONTINUE", "reason": "System Locked (Waiting for Reset)"}
 
-    # --- PRIORITY 2: LIVE AI DETECTION (Direct Mapping) ---
-    # We removed the "Latch" here. It strictly follows the AI.
-    
+    # --- PRIORITY 3: HANDLE MANUAL TRIP ---
+    if manual_command_queue == "TRIP":
+        print(f"⚠️ MANUAL TRIP TRIGGERED by Admin")
+        live_grid_state["status"] = "MANUAL_TRIP" # Lock the system
+        manual_command_queue = None
+        return {"command": "TRIP", "reason": "Manual Override"}
+
+    # --- PRIORITY 4: AUTOMATIC FAULT DETECTION ---
     if is_fault:
+        # 1. Latch the Status (This stops future TRIP commands)
         live_grid_state["status"] = "CRITICAL"
-        print(f"🚨 FAULT DETECTED: {fault_msg} | Sending TRIP")
+        print(f"🚨 FAULT DETECTED: {fault_msg} | TRIPPING CIRCUIT!")
         
-        # Log to DB
+        # 2. Log to DB
         log = models.FaultLog(
             substation_id=data.substation_id, line_id=data.line_id,
             voltage=voltage, current=data.current,
@@ -220,16 +225,14 @@ def receive_data(data: schemas.HardwareInput, db: Session = Depends(database.get
         db.add(log)
         db.commit()
         
-        # Send Alert
+        # 3. Send Alert
         notifications.send_alert("9988776655", "officer@kseb.in", fault_msg, data.current, voltage)
         
-        command_to_send = "TRIP"
-    else:
-        # If AI says Normal, we say CONTINUE/STABLE
-        live_grid_state["status"] = "STABLE"
-        command_to_send = "CONTINUE"
+        # 4. SEND TRIP (Only happens once because status changes to CRITICAL)
+        return {"command": "TRIP", "reason": fault_msg}
 
-    return {"command": command_to_send, "reason": fault_msg}
+    # If Normal and Not Locked
+    return {"command": "CONTINUE", "reason": "Normal"}
 
 # The User (Frontend) calls this
 @app.post("/api/control/{action}")
