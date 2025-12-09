@@ -1,0 +1,304 @@
+SIMPLIFIED HOUSEHOLD ELECTRICITY MANAGEMENT SYSTEM
+===================================================
+
+The backend now has ONLY 3 features:
+
+1. TRIP COUNT & EMAIL NOTIFICATION
+2. VOLTAGE FAULT DETECTION (Popups)
+3. THEFT DETECTION
+
+---
+
+## DATABASE SCHEMA (SIMPLIFIED)
+
+Consumer Model:
+  - id (primary key)
+  - meter_id (unique)
+  - substation_id (e.g., "SUB-01")
+  - email (for notifications)
+  - power_factor (latest reading)
+  - voltage (latest reading)
+  - trip_count (incremented counter)
+  - created_at
+
+---
+
+## API ENDPOINTS
+
+### 1. Register a Consumer
+POST /api/consumer/register
+
+Request:
+{
+  "meter_id": "MET-001",
+  "substation_id": "SUB-01",
+  "email": "customer@example.com"  // optional
+}
+
+Response:
+{
+  "status": "registered",
+  "consumer_id": 1,
+  "meter_id": "MET-001",
+  "substation_id": "SUB-01",
+  "message": "Consumer registered successfully"
+}
+
+
+### 2. Record Power Reading (FEATURES 1 & 2)
+POST /api/consumer/reading
+
+Request:
+{
+  "meter_id": "MET-001",
+  "power_kw": 5.5,      // Will trigger trip if > 5.0
+  "voltage": 125.5,     // Will trigger voltage fault popup
+  "power_factor": 0.95
+}
+
+Response:
+{
+  "status": "recorded",
+  "consumer_id": 1,
+  "meter_id": "MET-001",
+  "trip_count": 2,
+  "trip_occurred": true,
+  "power_kw": 5.5,
+  "voltage": 125.5,
+  "power_factor": 0.95,
+  "fault_type": "VOLTAGE_LOW",           // null, "VOLTAGE_LOW", or "PHASE_CHANGE"
+  "fault_message": "⚠️ VOLTAGE FLUCTUATION: Voltage below 130V detected",
+  "email_sent": false,                   // true when trip_count >= 5
+  "email_threshold_reached": false       // true when trip_count >= 5
+}
+
+
+### 3. Detect Theft on LT Phase
+GET /api/theft/detect?power_transmission=100.0&substation_id=SUB-01&phase=A
+
+Parameters:
+  - power_transmission: Actual power being transmitted on the phase (float, kW, required)
+  - substation_id: Substation identifier (string, required)
+  - phase: Phase letter "A", "B", or "C" (string, optional, default "A")
+
+Response:
+{
+  "theft_detected": true,
+  "phase": "A",
+  "power_transmission": 100.0,
+  "total_consumer_power": 85.0,
+  "unauthorized_power": 15.0,
+  "status": "THEFT_DETECTED",
+  "message": "🚨 PHASE A: POWER THEFT DETECTED! 15.00 kW unauthorized consumption",
+  "consumers_count": 8,
+  "substation_id": "SUB-01",
+  "detection_logic": "If transmission > sum(consumer_power) then theft exists"
+}
+
+---
+
+## FEATURE DETAILS
+
+### FEATURE 1: TRIP COUNT
+
+Logic:
+  - When power_kw > 5.0 (threshold): trip_count += 1
+  - Each reading that exceeds threshold increments the counter
+  - Counter is cumulative and never resets
+
+Threshold Power: 5.0 kW (hardcoded in main.py line ~330)
+
+To change: Modify "THRESHOLD_POWER = 5.0" in main.py
+
+
+### FEATURE 2: TRIP COUNT EMAIL
+
+Logic:
+  - When trip_count reaches 5: Send email to consumer
+  - Email asks consumer to increase their power threshold
+  - Email sent via Gmail SMTP
+
+Requirements:
+  - Consumer must have email address registered
+  - Gmail account configured with app-specific password
+  - Edit household_analyzer.py line 18-19 with your Gmail credentials:
+    sender_email = "your_email@gmail.com"
+    sender_password = "your_16_char_app_password"
+
+
+### FEATURE 3: VOLTAGE FAULT DETECTION
+
+Two levels of voltage faults:
+
+1. VOLTAGE_LOW: When voltage < 130V
+   - Popup message: "⚠️ VOLTAGE FLUCTUATION: Voltage below 130V detected"
+   - Indicates low voltage fluctuation
+
+2. PHASE_CHANGE: When voltage is 130V - 180V
+   - Popup message: "⚠️ PHASE CHANGE: Voltage between 130-180V (phase change detected)"
+   - Indicates potential phase change issue
+
+Frontend should detect "fault_type" in response and show popup accordingly.
+
+
+### FEATURE 3: POWER THEFT DETECTION
+
+Correct Logic:
+  - Actual power transmitted on phase (from substation) = power_transmission
+  - Sum all house consumption on that phase = total_consumer_power
+  - Unauthorized power = power_transmission - total_consumer_power
+  
+  If unauthorized_power > 0: POWER THEFT DETECTED
+  (Extra power is being consumed by unauthorized users on the LT phase)
+
+Example:
+  Substation transmitting 100 kW on Phase A
+  House consumption sum on Phase A: 85 kW
+  Unauthorized consumption: 100 - 85 = 15 kW
+  Result: ✓ THEFT DETECTED (15 kW being stolen)
+
+---
+
+## REMOVED FEATURES
+
+The following have been REMOVED to simplify the system:
+
+❌ ConsumerThreshold model (hour-based thresholds)
+❌ ConsumptionHistory model (historical tracking)
+❌ FaultPatternAnalysis model (pattern learning)
+❌ ClimateFaultLog model (weather-based faults)
+
+❌ /api/consumer/{id}/health endpoint
+❌ /api/consumer/{id}/dashboard endpoint
+❌ /api/consumer/{id}/consumption-stats endpoint
+❌ /api/consumer/{id}/adjust-threshold endpoint
+❌ /api/climate-alert endpoint
+
+❌ Time-based patterns detection
+❌ Voltage drop (far-end phase) detection
+❌ Voltage fluctuation detection (complex)
+❌ Consumption statistics
+
+---
+
+## TESTING THE 3 FEATURES
+
+### Test Trip Count:
+
+1. Register a consumer:
+POST /api/consumer/register
+{
+  "meter_id": "TEST-001",
+  "substation_id": "SUB-01",
+  "email": "test@example.com"
+}
+
+2. Send power reading above threshold:
+POST /api/consumer/reading
+{
+  "meter_id": "TEST-001",
+  "power_kw": 6.0,
+  "voltage": 230.0,
+  "power_factor": 0.95
+}
+
+Expected response:
+- "trip_occurred": true
+- "trip_count": 1
+
+
+3. Repeat 5 times to trigger email:
+After 5th trip:
+- "trip_count": 5
+- "email_sent": true
+- "email_threshold_reached": true
+
+
+### Test Voltage Faults:
+
+Send reading with voltage < 130:
+POST /api/consumer/reading
+{
+  "meter_id": "TEST-001",
+  "power_kw": 3.0,
+  "voltage": 125.0,    // < 130
+  "power_factor": 0.95
+}
+
+Expected response:
+- "fault_type": "VOLTAGE_LOW"
+- "fault_message": "⚠️ VOLTAGE FLUCTUATION: Voltage below 130V detected"
+
+Send reading with voltage 130-180:
+POST /api/consumer/reading
+{
+  "meter_id": "TEST-001",
+  "power_kw": 3.0,
+  "voltage": 150.0,    // 130 <= 150 <= 180
+  "power_factor": 0.95
+}
+
+Expected response:
+- "fault_type": "PHASE_CHANGE"
+- "fault_message": "⚠️ PHASE CHANGE: Voltage between 130-180V (phase change detected)"
+
+
+### Test Theft Detection:
+
+1. Register 3 consumers in SUB-01:
+   MET-001: power_factor = 30.0
+   MET-002: power_factor = 35.0
+   MET-003: power_factor = 20.0
+
+2. Update their readings:
+POST /api/consumer/reading
+{
+  "meter_id": "MET-001",
+  "power_kw": 30.0,
+  "voltage": 230.0,
+  "power_factor": 30.0
+}
+
+(Repeat for MET-002 and MET-003)
+Total house consumption = 30 + 35 + 20 = 85 kW
+
+3. Check theft on line with transmission power 100 kW:
+GET /api/theft/detect?power_transmission=100.0&substation_id=SUB-01&phase=A
+
+Expected response:
+{
+  "theft_detected": true,
+  "phase": "A",
+  "power_transmission": 100.0,
+  "total_consumer_power": 85.0,
+  "unauthorized_power": 15.0,
+  "status": "THEFT_DETECTED",
+  "message": "🚨 PHASE A: POWER THEFT DETECTED! 15.00 kW unauthorized consumption"
+}
+
+Interpretation:
+- Substation sending 100 kW on Phase A
+- Authorized houses consuming 85 kW
+- 15 kW unaccounted for = THEFT (unauthorized users consuming power)
+
+---
+
+## CONFIGURATION
+
+To customize thresholds, edit main.py:
+
+Line ~330:
+THRESHOLD_POWER = 5.0       # Change this for different power threshold
+TRIP_LIMIT = 5              # Change this for different email trigger
+
+Email sender (household_analyzer.py, line ~18-19):
+sender_email = "your_email@gmail.com"
+sender_password = "your_app_password"
+
+Voltage boundaries (main.py, line ~350-355):
+if reading.voltage < 130:   # Change 130 for voltage low threshold
+if 130 <= reading.voltage <= 180:  # Change 130 and 180 for phase change range
+
+---
+
+This is now a LIGHTWEIGHT system with only the 3 essential features you requested.

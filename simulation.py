@@ -16,12 +16,15 @@ def run_simulation():
     print("🚀 PHYSICS SIMULATION STARTED (Full Visibility Mode)...")
     time.sleep(2)
 
-    # Scenarios cycle
-    scenarios = ["NORMAL", "SLG", "LL", "LLG", "LLL", "OPEN", "HIGH_Z"]
+# Scenarios in fixed sequence
+    scenarios = ["NORMAL", "SLG", "NORMAL", "LL", "NORMAL", "LLG", "NORMAL", "LLL", "OPEN", "HIGH_Z"]
+    index = 0
 
     while True:
         try:
-            scenario = random.choice(scenarios)
+        # Follow the sequence in order
+            scenario = scenarios[index]
+            index = (index + 1) % len(scenarios)
             
             # --- 1. GENERATE PHYSICS DATA ---
             load_kw = random.uniform(10, 30)
