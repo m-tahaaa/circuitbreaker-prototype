@@ -1,77 +1,77 @@
 import joblib
 import numpy as np
 import os
-import random
 import warnings
 
-# Suppress warnings for cleaner logs
-warnings.filterwarnings("ignore", message="X does not have valid feature names")
+# Suppress sklearn warnings about feature names
+warnings.filterwarnings("ignore")
 
 # --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "model", "three_phase_fault_detector_6feat.pkl")
+# Ensure this matches your training file name
+MODEL_PATH = os.path.join(BASE_DIR, "model", "final_fault_model.pkl") 
+NOMINAL_V_PHASE = 230.0
 
-# --- FAULT MAPPING (Must match your training labels exactly) ---
-# Your training script splits labels by '_', so "High_Impedance_R" becomes "High"
-FAULT_MAPPING = {
-    "Normal": "Normal Condition",
-    "LLL/LLLG": "Three Phase Fault",
-    "SLG": "Single Line to Ground",
-    "LL": "Line to Line",
-    "DLG": "Double Line to Ground",
-    "Open": "Open Conductor",
-    "High": "High Impedance"
-}
-
-# --- LOAD MODEL ---
 model = None
 try:
     print(f"🧠 AI ENGINE: Loading model from {MODEL_PATH}")
     model = joblib.load(MODEL_PATH)
     print("✅ AI ENGINE: Model Loaded Successfully!")
 except Exception as e:
-    print(f"⚠️ AI ENGINE ERROR: Could not load model: {e}")
+    print(f"⚠️ AI ENGINE ERROR: {e}")
 
-def analyze_data(current_R: float, voltage_R: float):
+def calculate_expected_current(load_kw, pf, voltage):
+    """Physics Formula: I = P / (3 * V * PF)"""
+    if pf <= 0.1 or voltage <= 1: return 0.0
+    return (load_kw * 1000) / (3 * voltage * pf)
+
+def analyze_data(data):
     """
-    Inputs: Real Current (R) and Simulated Voltage (R)
-    Outputs: (is_fault, fault_message, voltage)
+    Inputs: HardwareInput object (8 features: Load, PF, 3xV, 3xI)
+    Outputs: (is_fault, fault_message)
     """
-    
-    # Default Safe State
     is_fault = False
     fault_msg = "Normal"
 
-    # --- 1. SIMULATE MISSING PHASES (Y & B) ---
-    # We assume Phases Y and B are Healthy (~6A, ~230V)
-    current_Y = random.uniform(5.0, 7.0)
-    current_B = random.uniform(5.0, 7.0)
-    voltage_Y = random.uniform(228.0, 232.0)
-    voltage_B = random.uniform(228.0, 232.0)
+    # --- 1. CALCULATE DERIVED FEATURES (The missing 6) ---
+    # We must match the training logic exactly:
+    # 1. Calculate Expected Current (Physics Baseline)
+    i_expected = calculate_expected_current(data.load_kw, data.pf, NOMINAL_V_PHASE)
+    
+    # 2. Calculate Deviations (Difference from Expected)
+    dev_Va = data.voltage_a - NOMINAL_V_PHASE
+    dev_Vb = data.voltage_b - NOMINAL_V_PHASE
+    dev_Vc = data.voltage_c - NOMINAL_V_PHASE
+    
+    dev_Ia = data.current_a - i_expected
+    dev_Ib = data.current_b - i_expected
+    dev_Ic = data.current_c - i_expected
 
-    # Construct the 6-feature vector: [IR, IY, IB, VR, VY, VB]
-    input_features = np.array([[current_R, current_Y, current_B, voltage_R, voltage_Y, voltage_B]])
+    # --- 2. CONSTRUCT 14-FEATURE VECTOR ---
+    # Order MUST match training: 
+    # [Load, PF, Va, Vb, Vc, Ia, Ib, Ic, Dev_Va, Dev_Vb, Dev_Vc, Dev_Ia, Dev_Ib, Dev_Ic]
+    input_features = np.array([[
+        data.load_kw, data.pf,
+        data.voltage_a, data.voltage_b, data.voltage_c,
+        data.current_a, data.current_b, data.current_c,
+        dev_Va, dev_Vb, dev_Vc,
+        dev_Ia, dev_Ib, dev_Ic
+    ]])
 
-    # --- 2. ML PREDICTION ---
+    # --- 3. ML PREDICTION ---
     if model:
         try:
-            # Get the raw prediction string from the model
-            prediction_code = model.predict(input_features)[0]
-            prediction_str = str(prediction_code)
+            prediction = model.predict(input_features)[0]
+            pred_str = str(prediction).strip()
             
-            # DEBUG PRINT: Use this to see why it fails!
-            print(f"🔍 AI INPUT: I=[{current_R:.1f}, {current_Y:.1f}, {current_B:.1f}] V=[{voltage_R:.1f}, {voltage_Y:.1f}, {voltage_B:.1f}]")
-            print(f"🧠 AI PREDICTION: '{prediction_str}'")
+            # Debug Print (Optional: See what AI thinks)
+            # print(f"AI Input: Ia={data.current_a:.1f} -> Pred: {pred_str}")
 
-            # Check if the prediction is NOT Normal
-            # Note: We use strip() to remove any accidental spaces
-            if prediction_str.strip() != "Normal":
+            if pred_str != "Normal":
                 is_fault = True
-                fault_msg = FAULT_MAPPING.get(prediction_str, f"Unknown ({prediction_str})")
-                
+                fault_msg = pred_str # e.g., "SLG", "Open"
         except Exception as e:
-            print(f"❌ Prediction Crash: {e}")
-            # No backup rules anymore, so we default to Normal if crash
+            print(f"❌ AI Prediction Error: {e}")
             pass
-            
-    return is_fault, fault_msg, voltage_R
+
+    return is_fault, fault_msg, data.voltage_a

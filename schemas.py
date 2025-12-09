@@ -47,6 +47,20 @@ class FaultLogDisplay(BaseModel):
     class Config:
         from_attributes = True
 
+class HardwareInput(BaseModel):
+    substation_id: str
+    line_id: str
+    
+    # The 8 Features needed by your ML Model
+    load_kw: float
+    pf: float
+    voltage_a: float
+    voltage_b: float
+    voltage_c: float
+    current_a: float
+    current_b: float
+    current_c: float
+
 class MapPin(BaseModel):
     substation_id: str
     location_name: str

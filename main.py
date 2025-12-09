@@ -176,63 +176,63 @@ def get_map_pins(user: models.User = Depends(auth.get_current_user)):
 
 # --- 3. HARDWARE CONTROL ---
 # The Bridge calls this every 1 second
+# --- HARDWARE DATA INGESTION ---
 @app.post("/hardware/data")
 def receive_data(data: schemas.HardwareInput, db: Session = Depends(database.get_db)):
     global manual_command_queue, live_grid_state
     
-    # 1. Run Logic (Update Live Values)
-    is_fault, fault_msg, voltage = ai_engine.analyze_data(data.current, data.voltage)
+    # 1. Run AI Analysis
+    is_fault, fault_msg, voltage = ai_engine.analyze_data(data)
     
+    # Update Live Cache
     live_grid_state["voltage"] = voltage
-    live_grid_state["current"] = data.current
+    live_grid_state["current"] = data.current_a
     live_grid_state["last_updated"] = datetime.now(timezone.utc)
 
-    # --- PRIORITY 1: HANDLE MANUAL RESET (The Only Way Out) ---
-    if manual_command_queue == "RESET":
-        print(f"✅ MANUAL RESET TRIGGERED by Admin")
-        live_grid_state["status"] = "STABLE" # Unlock the system
-        manual_command_queue = None
-        return {"command": "RESET", "reason": "Manual Reset"}
+    command_to_send = "CONTINUE"
 
-    # --- PRIORITY 2: CHECK LATCH (Safety Lock) ---
-    # If system is already tripped, DO NOTHING.
-    if live_grid_state["status"] in ["CRITICAL", "MANUAL_TRIP"]:
-        # If we have a queued TRIP command but we are already tripped, just clear it
-        if manual_command_queue == "TRIP": 
-            manual_command_queue = None
-            
-        return {"command": "CONTINUE", "reason": "System Locked (Waiting for Reset)"}
-
-    # --- PRIORITY 3: HANDLE MANUAL TRIP ---
-    if manual_command_queue == "TRIP":
-        print(f"⚠️ MANUAL TRIP TRIGGERED by Admin")
-        live_grid_state["status"] = "MANUAL_TRIP" # Lock the system
-        manual_command_queue = None
-        return {"command": "TRIP", "reason": "Manual Override"}
-
-    # --- PRIORITY 4: AUTOMATIC FAULT DETECTION ---
-    if is_fault:
-        # 1. Latch the Status (This stops future TRIP commands)
-        live_grid_state["status"] = "CRITICAL"
-        print(f"🚨 FAULT DETECTED: {fault_msg} | TRIPPING CIRCUIT!")
+    # --- PRIORITY 1: MANUAL OVERRIDE (RESET/TRIP) ---
+    if manual_command_queue:
+        print(f"⚠️ EXECUTING MANUAL COMMAND: {manual_command_queue}")
+        command_to_send = manual_command_queue
         
-        # 2. Log to DB
+        if command_to_send == "TRIP":
+            live_grid_state["status"] = "MANUAL_TRIP"
+        elif command_to_send == "RESET":
+            live_grid_state["status"] = "STABLE"
+            
+        manual_command_queue = None 
+        return {"command": command_to_send, "reason": "Manual Override"}
+
+    # --- PRIORITY 2: REAL-TIME FAULT DETECTION ---
+    # No Latch. Logic is purely based on current sensor reading.
+    
+    if is_fault:
+        live_grid_state["status"] = "CRITICAL"
+        print(f"🚨 FAULT DETECTED: {fault_msg}")
+        
+        # Log to DB
         log = models.FaultLog(
             substation_id=data.substation_id, line_id=data.line_id,
-            voltage=voltage, current=data.current,
+            voltage=voltage, current=data.current_a, 
             fault_type=fault_msg, status="Active"
         )
         db.add(log)
         db.commit()
         
-        # 3. Send Alert
-        notifications.send_alert("9988776655", "officer@kseb.in", fault_msg, data.current, voltage)
+        # Send Alert
+        notifications.send_alert("9988776655", "officer@kseb.in", fault_msg, data.current_a, voltage)
         
-        # 4. SEND TRIP (Only happens once because status changes to CRITICAL)
-        return {"command": "TRIP", "reason": fault_msg}
+        command_to_send = "TRIP"
+    else:
+        # If AI says Normal, we go back to STABLE immediately
+        # (Unless we are in a Manual Trip state, which we usually preserve)
+        if live_grid_state["status"] == "CRITICAL":
+            live_grid_state["status"] = "STABLE"
+            
+        command_to_send = "CONTINUE"
 
-    # If Normal and Not Locked
-    return {"command": "CONTINUE", "reason": "Normal"}
+    return {"command": command_to_send, "reason": fault_msg}
 
 # The User (Frontend) calls this
 @app.post("/api/control/{action}")
