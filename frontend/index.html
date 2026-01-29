@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KSEB Smart Grid</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Login Page -->
+        <div id="login-page" class="page active">
+            <div class="login-container">
+                <div class="logo">⚡</div>
+                <h1>KSEB Smart Grid</h1>
+                <p class="subtitle">LT Line Fault Detection System</p>
+                
+                <form id="login-form">
+                    <div class="form-group">
+                        <label>User ID</label>
+                        <input type="text" id="login-userid" placeholder="Enter User ID" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="login-password" placeholder="Enter Password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Login</button>
+                </form>
+                
+                <div id="login-error" class="error-msg"></div>
+            </div>
+        </div>
+
+        <!-- Registration Page -->
+        <div id="register-page" class="page">
+            <div class="register-container">
+                <h2>Complete Registration</h2>
+                <p class="subtitle">Please fill in your details to complete registration</p>
+                
+                <form id="register-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>First Name</label>
+                            <input type="text" id="reg-firstname" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Last Name</label>
+                            <input type="text" id="reg-lastname" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" id="reg-email" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Phone Number</label>
+                            <input type="tel" id="reg-phone" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Substation ID</label>
+                            <input type="text" id="reg-substation" placeholder="e.g. SUB-01" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Substation Location</label>
+                            <input type="text" id="reg-location" placeholder="e.g. Kochi North" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>New User ID</label>
+                            <input type="text" id="reg-new-userid" required>
+                        </div>
+                        <div class="form-group">
+                            <label>New Password</label>
+                            <input type="password" id="reg-new-password" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Complete Registration</button>
+                </form>
+                
+                <div id="register-error" class="error-msg"></div>
+            </div>
+        </div>
+
+        <!-- Main Dashboard -->
+        <div id="dashboard-page" class="page">
+            <nav class="navbar">
+                <div class="nav-brand">⚡ KSEB Smart Grid</div>
+                <div class="nav-user">
+                    <span id="user-name">Officer</span>
+                    <button class="btn btn-small" onclick="logout()">Logout</button>
+                </div>
+            </nav>
+
+            <div class="sidebar">
+                <button class="nav-item active" data-section="dashboard">📊 Dashboard</button>
+                <button class="nav-item" data-section="grid-control">🔌 Grid Control</button>
+                <button class="nav-item" data-section="consumers">🏠 Consumers</button>
+                <button class="nav-item" data-section="theft-detection">🔍 Theft Detection</button>
+                <button class="nav-item admin-only" data-section="admin">👑 Admin Panel</button>
+            </div>
+
+            <main class="main-content">
+                <!-- Dashboard Section -->
+                <section id="section-dashboard" class="section active">
+                    <h2>Grid Status Dashboard</h2>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">⚡</div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="stat-voltage">0</span>
+                                <span class="stat-label">Voltage (V)</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">🔌</div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="stat-current">0</span>
+                                <span class="stat-label">Current (A)</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" id="status-icon">🟢</div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="stat-status">WAITING</span>
+                                <span class="stat-label">Grid Status</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">🕐</div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="stat-updated">--</span>
+                                <span class="stat-label">Last Updated</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Recent Fault Logs</h3>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Substation</th>
+                                    <th>Line</th>
+                                    <th>Fault Type</th>
+                                    <th>Voltage</th>
+                                    <th>Current</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fault-logs-body">
+                                <tr><td colspan="7" class="no-data">No fault logs yet</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Grid Control Section -->
+                <section id="section-grid-control" class="section">
+                    <h2>Manual Grid Control</h2>
+                    
+                    <div class="control-panel">
+                        <div class="card">
+                            <h3>Emergency Controls</h3>
+                            <div class="button-group">
+                                <button class="btn btn-danger" onclick="sendControlCommand('TRIP')">🔴 TRIP Circuit</button>
+                                <button class="btn btn-success" onclick="sendControlCommand('RESET')">🟢 RESET Circuit</button>
+                            </div>
+                            <div id="control-result" class="result-msg"></div>
+                        </div>
+
+                        <div class="card">
+                            <h3>Manual Data Input</h3>
+                            <form id="manual-input-form">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>Voltage (V)</label>
+                                        <input type="number" id="input-voltage" step="0.1" value="230" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Current (A)</label>
+                                        <input type="number" id="input-current" step="0.1" value="10" required>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>Load (kW)</label>
+                                        <input type="number" id="input-load" step="0.1" value="20" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Power Factor</label>
+                                        <input type="number" id="input-pf" step="0.01" min="0" max="1" value="0.9" required>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary">Submit Reading</button>
+                            </form>
+                            <div id="manual-input-result" class="result-msg"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Consumers Section -->
+                <section id="section-consumers" class="section">
+                    <h2>Household Consumer Management</h2>
+                    
+                    <div class="card">
+                        <h3>Register New Consumer</h3>
+                        <form id="consumer-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Meter ID</label>
+                                    <input type="text" id="consumer-meter" placeholder="e.g. MTR-001" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Substation ID</label>
+                                    <input type="text" id="consumer-substation" placeholder="e.g. SUB-01" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Email (optional - for trip alerts)</label>
+                                <input type="email" id="consumer-email" placeholder="consumer@email.com">
+                            </div>
+                            <button type="submit" class="btn btn-primary">Register Consumer</button>
+                        </form>
+                        <div id="consumer-result" class="result-msg"></div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Record Power Reading</h3>
+                        <form id="power-reading-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Meter ID</label>
+                                    <input type="text" id="reading-meter" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Power (kW)</label>
+                                    <input type="number" id="reading-power" step="0.1" required>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Voltage (V)</label>
+                                    <input type="number" id="reading-voltage" step="0.1" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Power Factor</label>
+                                    <input type="number" id="reading-pf" step="0.01" min="0" max="1" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Submit Reading</button>
+                        </form>
+                        <div id="power-reading-result" class="result-msg"></div>
+                    </div>
+                </section>
+
+                <!-- Theft Detection Section -->
+                <section id="section-theft-detection" class="section">
+                    <h2>Power Theft Detection</h2>
+                    
+                    <div class="card">
+                        <h3>Detect Theft on LT Phase</h3>
+                        <p class="info-text">Compare transmitted power with sum of consumer consumption to detect unauthorized usage.</p>
+                        
+                        <form id="theft-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Power Transmission (kW)</label>
+                                    <input type="number" id="theft-power" step="0.1" placeholder="Total power on phase" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Substation ID</label>
+                                    <input type="text" id="theft-substation" placeholder="e.g. SUB-01" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Phase</label>
+                                <select id="theft-phase">
+                                    <option value="A">Phase A</option>
+                                    <option value="B">Phase B</option>
+                                    <option value="C">Phase C</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Detect Theft</button>
+                        </form>
+                        
+                        <div id="theft-result" class="result-box"></div>
+                    </div>
+                </section>
+
+                <!-- Admin Section -->
+                <section id="section-admin" class="section">
+                    <h2>Admin Panel</h2>
+                    
+                    <div class="card">
+                        <h3>Create Temporary Officer Credentials</h3>
+                        <p class="info-text">Generate invite-only credentials for new officers.</p>
+                        
+                        <form id="admin-create-form">
+                            <div class="form-group">
+                                <label>Role</label>
+                                <select id="admin-role">
+                                    <option value="officer">Officer</option>
+                                    <option value="admin">Admin</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Generate Credentials</button>
+                        </form>
+                        
+                        <div id="admin-result" class="result-box"></div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -50,6 +50,7 @@ class Consumer(Base):
     email = Column(String, nullable=True)  # For notifications
     
     # Latest readings
+    power_kw = Column(Float, default=0.0)  # Power consumption in kW
     power_factor = Column(Float, default=0.0)
     voltage = Column(Float, default=0.0)
     trip_count = Column(Integer, default=0)

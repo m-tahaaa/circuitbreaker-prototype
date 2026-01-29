@@ -101,10 +101,14 @@ def run_simulation():
 
         time.sleep(4)
 
-def start():
+def start_simulation_mode():
+    """Start simulation in background thread - called by main.py on startup"""
     t = threading.Thread(target=run_simulation, daemon=True)
     t.start()
 
+# Alias for backward compatibility
+start = start_simulation_mode
+
 if __name__ == "__main__":
-    start()
+    start_simulation_mode()
     while True: time.sleep(1)

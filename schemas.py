@@ -62,16 +62,6 @@ class ManualGridInput(BaseModel):
     substation_id: str = "SUB-SIM-01"
     line_id: str = "FEEDER-05"
 
-# --- DASHBOARD & MAP ---
-
-class MapPin(BaseModel):
-    substation_id: str
-    location_name: str
-    status: str
-    lat: float
-    lon: float
-    google_maps_link: str
-
 
 # --- HOUSEHOLD ELECTRICITY MANAGEMENT (SIMPLIFIED) ---
 

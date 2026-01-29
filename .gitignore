@@ -1,3 +1,18 @@
+# Database
 grid.db
-venv
+
+# Virtual Environment
+.venv/
+
+# Python Cache
 __pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Generated files
+Final_Fault_Dataset.csv
+DEMO_GUIDE.md

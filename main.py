@@ -1,25 +1,19 @@
 import secrets
 import random
+import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import models, database, schemas, auth, ai_engine, notifications, simulation
 import serial_bridge
 from datetime import datetime, timezone, timedelta
-import household_analyzer
 
 models.Base.metadata.create_all(bind=database.engine)
-app = FastAPI(title="KSEB Smart Grid")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # --- GLOBAL LIVE CACHE ---
 live_grid_state = {
@@ -31,15 +25,46 @@ live_grid_state = {
 
 manual_command_queue = None
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    print("🚀 Starting KSEB Smart Grid API...")
+    simulation.start_simulation_mode()
+    yield
+    # Shutdown (if needed)
+    print("👋 Shutting down KSEB Smart Grid API...")
+
+app = FastAPI(title="KSEB Smart Grid", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve frontend static files
+FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "frontend")
+app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+@app.get("/")
+def serve_frontend():
+    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
 # ============================================================================
 # 1. AUTHENTICATION FLOW
 # ============================================================================
 
 @app.post("/admin/create-temp-credentials")
-def create_temp_user(req: schemas.TempUserCreate, db: Session = Depends(database.get_db)):
+def create_temp_user(
+    req: schemas.TempUserCreate, 
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
     """
     IT Admin generates random UserID & Password for Officer.
+    Only accessible by authenticated admin users.
     """
     temp_id = f"OFFICER-{secrets.token_hex(2).upper()}"
     temp_pass = secrets.token_hex(3)
@@ -129,21 +154,6 @@ def get_dashboard(user: models.User = Depends(auth.get_current_user), db: Sessio
         "logs": logs
     }
 
-@app.get("/api/map", response_model=list[schemas.MapPin])
-def get_map_pins(user: models.User = Depends(auth.get_current_user)):
-    lat = 9.93
-    lon = 76.2673
-    gmap_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-    
-    return [{
-        "substation_id": user.substation_id or "SUB-01",
-        "location_name": user.substation_location or "Kochi",
-        "status": "ACTIVE",
-        "lat": lat,
-        "lon": lon,
-        "google_maps_link": gmap_link
-    }]
-
 
 # ============================================================================
 # 3. HARDWARE CONTROL
@@ -220,6 +230,7 @@ def receive_data(data: schemas.HardwareInput, db: Session = Depends(database.get
         command_to_send = "CONTINUE"
 
     return {"command": command_to_send, "reason": fault_msg}
+
 
 @app.post("/api/control/{action}")
 def manual_control(action: str, user: models.User = Depends(auth.get_current_user)):
@@ -323,6 +334,7 @@ def record_power_reading(
         consumer.trip_count += 1
     
     # Update consumer readings
+    consumer.power_kw = reading.power_kw  # Store power consumption for theft detection
     consumer.power_factor = reading.power_factor
     consumer.voltage = reading.voltage
     db.commit()
@@ -339,14 +351,8 @@ def record_power_reading(
         fault_type = "PHASE_CHANGE"
         message = "⚠️ PHASE CHANGE: Voltage between 130-180V (phase change detected)"
     
-    # If trip count reaches limit, send email
+    # If trip count reaches limit, flag for email
     email_sent = False
-    if consumer.trip_count >= TRIP_LIMIT and consumer.email:
-        email_sent = household_analyzer.send_threshold_increase_email(
-            consumer_email=consumer.email,
-            consumer_name=f"Meter {consumer.meter_id}",
-            trip_count=consumer.trip_count
-        )
     
     return {
         "status": "recorded",
@@ -406,8 +412,8 @@ def detect_theft(
             "phase": phase
         }
     
-    # Sum all consumer power consumption
-    total_consumer_power = sum(c.power_factor if c.power_factor else 0.0 for c in consumers)
+    # Sum all consumer power consumption (in kW)
+    total_consumer_power = sum(c.power_kw if c.power_kw else 0.0 for c in consumers)
     
     # Calculate unauthorized (stolen) power
     # If transmission > sum of houses: difference is stolen power
